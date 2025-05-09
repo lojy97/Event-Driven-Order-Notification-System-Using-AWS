@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Event-Driven Order Notification System (SNS + SQS + Lambda + DynamoDB)
+
+Resources:
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Orders
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      BillingMode: PAYPERREQUEST
+
+  DeadOrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: DeadOrderQueue
+
+  OrderQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: OrderQueue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadOrderQueue.Arn
+        maxReceiveCount: 3
+
+  OrderTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: OrderTopic
+
+  OrderQueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderTopic
+      Protocol: sqs
+      Endpoint: !GetAtt OrderQueue.Arn
+      RawMessageDelivery: true
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaOrderProcessorRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
+
+  OrderLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: OrderProcessorFunction
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Code:
+        ZipFile: |
+          import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
+          import { marshall } from "@aws-sdk/util-dynamodb";
+
+          const client = new DynamoDBClient({ region: "us-east-1" });
+
+          export const handler = async (event) => {
+            for (const record of event.Records) {
+              try {
+                const snsEnvelope = JSON.parse(record.body);
+                console.log("SNS envelope:", snsEnvelope);
+
+                const message = JSON.parse(snsEnvelope.Message);
+                console.log("Parsed order message:", message);
+
+                if (!message.orderId) {
+                  throw new Error("Missing required field: orderId");
+                }
+
+                const item = {
+                  orderId: message.orderId,
+                  userId: message.userId,
+                  itemName: message.itemName,
+                  quantity: message.quantity,
+                  status: message.status,
+                  timestamp: message.timestamp
+                };
+
+                const command = new PutItemCommand({
+                  TableName: "Orders",
+                  Item: marshall(item, { removeUndefinedValues: true })
+                });
+
+                await client.send(command);
+                console.log("✅ Order saved to DynamoDB:", item);
+              } catch (err) {
+                console.error("❌ Error processing order:", err);
+              }
+            }
+          };
+
+  LambdaSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      EventSourceArn: !GetAtt OrderQueue.Arn
+      FunctionName: !Ref OrderLambdaFunction
+
+Outputs:
+  SNSOrderTopicArn:
+    Description: ARN of the SNS Topic
+    Value: !Ref OrderTopic
+
+  SQSEndpoint:
+    Description: SQS Queue ARN
+    Value: !GetAtt OrderQueue.Arn
+
+  DynamoDBTableName:
+    Description: DynamoDB Table Name
+    Value: !Ref OrdersTable

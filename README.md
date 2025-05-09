@@ -51,3 +51,7 @@ This project implements an event-driven architecture using AWS services to proce
   "status": "new",
   "timestamp": "2025-05-03T12:00:00Z"
 }
+
+## 📊 Architecture Diagram
+
+![Architecture Diagram](docs/architecture.png)

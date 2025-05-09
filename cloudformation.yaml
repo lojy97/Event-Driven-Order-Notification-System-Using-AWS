@@ -28,6 +28,22 @@ Resources:
         deadLetterTargetArn: !GetAtt DeadOrderQueue.Arn
         maxReceiveCount: 3
 
+  OrderQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref OrderQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "SQS:SendMessage"
+            Resource: !GetAtt OrderQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderTopic
+
   OrderTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -60,26 +76,23 @@ Resources:
   OrderLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: OrderProcessorFunction
-      Runtime: nodejs20.x
+      FunctionName: ProcessOrderFunction
+      Runtime: nodejs22.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 10
       MemorySize: 128
       Code:
         ZipFile: |
-          import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
-          import { marshall } from "@aws-sdk/util-dynamodb";
+          const { DynamoDBClient, PutItemCommand } = require("@aws-sdk/client-dynamodb");
+          const { marshall } = require("@aws-sdk/util-dynamodb");
 
           const client = new DynamoDBClient({ region: "us-east-1" });
 
-          export const handler = async (event) => {
+          exports.handler = async (event) => {
             for (const record of event.Records) {
               try {
-                const snsEnvelope = JSON.parse(record.body);
-                console.log("SNS envelope:", snsEnvelope);
-
-                const message = JSON.parse(snsEnvelope.Message);
+                const message = JSON.parse(record.body);
                 console.log("Parsed order message:", message);
 
                 if (!message.orderId) {
@@ -116,6 +129,7 @@ Resources:
       FunctionName: !Ref OrderLambdaFunction
 
 Outputs:
+
   SNSOrderTopicArn:
     Description: ARN of the SNS Topic
     Value: !Ref OrderTopic

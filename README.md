@@ -12,7 +12,7 @@ This project implements an event-driven architecture using AWS services to proce
 - **Amazon DynamoDB (Orders Table)** – Stores structured order data
 - **Dead Letter Queue (OrderDLQ)** – Captures failed messages after 3 attempts
 
-## 📊 Architecture Diagram
+## Architecture Diagram
 
 ![Architecture Diagram](cloudas2.drawio.png)
 

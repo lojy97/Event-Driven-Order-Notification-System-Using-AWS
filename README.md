@@ -14,7 +14,7 @@ This project implements an event-driven architecture using AWS services to proce
 
 ## 📊 Architecture Diagram
 
-![Architecture Diagram](docs/architecture.png)
+![Architecture Diagram](cloudas2.drawio.png)
 
 ---
 
